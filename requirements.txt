@@ -1,12 +1,9 @@
-numpy
-pandas
-yfinance
-scikit-learn
-plotly>=5.0
-textblob
-beautifulsoup4
-requests
-streamlit>=1.28.0
-newsapi-python
-altair<5
+numpy>=1.24,<3
+pandas>=2.1,<4
+yfinance>=0.2,<2
+scikit-learn>=1.2,<2
+plotly>=5,<8
+textblob>=0.17,<1
+streamlit>=1.60,<2
+newsapi-python==0.2.7
 

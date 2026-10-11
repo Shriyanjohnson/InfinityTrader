@@ -1,203 +1,240 @@
-import yfinance as yf
-import streamlit as st
-import pandas as pd
-import numpy as np
-import datetime
+import html
 import os
-from textblob import TextBlob
-from newsapi import NewsApiClient
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.preprocessing import StandardScaler
+import re
+
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import difflib  # For finding the closest matching symbols
+import streamlit as st
+import yfinance as yf
+from newsapi import NewsApiClient
+from textblob import TextBlob
 
-# Read the NewsAPI credential from the environment.
-API_KEY = os.environ.get("NEWSAPI_KEY", "")
+from analytics import add_indicators, analyze, demo_history
+from product import render_product_page
 
-# Custom On-Balance Volume (OBV) function
-def custom_on_balance_volume(df):
-    obv = [0]
-    for i in range(1, len(df)):
-        if df['Close'][i] > df['Close'][i - 1]:
-            obv.append(obv[-1] + df['Volume'][i])
-        elif df['Close'][i] < df['Close'][i - 1]:
-            obv.append(obv[-1] - df['Volume'][i])
-        else:
-            obv.append(obv[-1])
-    df['OBV'] = obv
-    return df
+st.set_page_config(page_title="InfinityTrader · Market research", page_icon="📈", layout="wide")
+st.markdown("""
+<style>
+.block-container {padding-top:4rem; padding-bottom:2rem; max-width:1550px;}
+[data-testid="stSidebar"] {border-right:1px solid #213043;}
+[data-testid="stMetric"] {background:#101c2c; border:1px solid #26364a; border-radius:12px; padding:18px;}
+[data-testid="stMetricLabel"] {color:#a2b2c7; font-size:.8rem;}
+[data-testid="stMetricValue"] {font-size:1.85rem; letter-spacing:-.06rem;}
+h1 {font-size:2.5rem !important; letter-spacing:-.08rem; padding-bottom:.3rem !important;}
+h3 {font-size:1.15rem !important;}
+.eyebrow {font-size:.7rem; letter-spacing:.17em; color:#8397b1; font-weight:700;}
+.brand {font-size:1.35rem; font-weight:750; letter-spacing:-.04em; margin-bottom:1.5rem;}
+.brand span {color:#56e0b4;}
+.tag {display:inline-block; padding:.4rem .7rem; border:1px solid #3c4d65;
+ border-radius:6px; color:#c4b5fd; font-size:.7rem; letter-spacing:.06em; font-weight:700;}
+.signal {font-size:2rem; font-weight:700; color:#56e0b4; margin:.3rem 0;}
+.hero {font-size:3.5rem; font-weight:750; letter-spacing:-.12rem; line-height:1.1; margin:1.3rem 0;}
+.hero span {color:#56e0b4;}
+.muted {color:#91a5bf; font-size:1rem; line-height:1.7;}
+.footer {color:#8094ae; font-size:.75rem; padding-top:1.5rem; border-top:1px solid #213043; margin-top:1rem;}
+</style>
+""", unsafe_allow_html=True)
 
-# Fetch stock data
-@st.cache_data
-def fetch_stock_data(symbol):
-    stock = yf.Ticker(symbol)
-    data = stock.history(period="90d")
-    data['RSI'] = data['Close'].pct_change().rolling(14).mean()
-    data['ATR'] = (data['High'] - data['Low']).rolling(14).mean()
-    data = custom_on_balance_volume(data)
-    data['SMA_20'] = data['Close'].rolling(window=20).mean()
-    data['SMA_50'] = data['Close'].rolling(window=50).mean()
-    data.dropna(inplace=True)
-    return data
+COMPANIES = {"AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOG": "Alphabet",
+             "AMZN": "Amazon", "TSLA": "Tesla", "META": "Meta", "SPY": "S&P 500 ETF"}
 
-# Fetch real-time stock price
-def fetch_real_time_price(symbol):
-    stock = yf.Ticker(symbol)
-    real_time_data = stock.history(period="1d", interval="1m")
-    return real_time_data['Close'][-1]  # Latest closing price
 
-# Fetch sentiment score from news articles
-@st.cache_data
-def fetch_sentiment(symbol):
-    if not API_KEY:
-        return 0
-    try:
-        newsapi = NewsApiClient(api_key=API_KEY)
-        articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5).get('articles', [])
-        if not articles:
-            return 0
-        sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
-        return sentiment_score
-    except Exception as e:
-        st.error(f"Error fetching sentiment: {e}")
-        return 0
+@st.cache_data(ttl=300, show_spinner=False)
+def load_history(symbol, mode):
+    if mode == "Demo":
+        return demo_history(symbol)
+    history = yf.Ticker(symbol).history(period="1y", auto_adjust=True, raise_errors=True, timeout=12)
+    if history.empty:
+        raise ValueError("No history returned for this symbol.")
+    return history
 
-# Train Machine Learning Model
-@st.cache_resource
-def train_model(data):
-    data['Price Change'] = data['Close'].diff()
-    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
-    features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
-    labels = data['Target']
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
-    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    grid_search = GridSearchCV(estimator=model, param_grid={'n_estimators': [50, 100, 200]}, cv=5, scoring='accuracy')
-    grid_search.fit(X_train, y_train)
-    best_model = grid_search.best_estimator_
-    return best_model, grid_search.best_score_ * 100, X_test, y_test
 
-# Performance Tracking Function
-def track_performance(model, X_test, y_test):
-    predicted = model.predict(X_test)
-    accuracy = (predicted == y_test).mean() * 100
-    return accuracy
+@st.cache_data(ttl=300, show_spinner=False)
+def model_result(data):
+    return analyze(data)
 
-# Option Recommendation Function
-def generate_recommendation(data, sentiment_score, model, symbol):
-    latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['ATR'], latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50']]])
-    prediction_prob = model.predict_proba(latest_features)[0][1]
-    option = "Call" if prediction_prob > 0.5 else "Put"
-    if sentiment_score > 0.2 and option == "Put":
-        option = "Call"
-    elif sentiment_score < -0.2 and option == "Call":
-        option = "Put"
-    strike_price = round(latest_data['Close'] / 10) * 10
-    expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
-    
-    # Automated Alert (threshold check)
-    if prediction_prob > 0.75:  # Threshold for alert (e.g., high probability prediction)
-        st.warning(f"🔔 Alert! High probability of a **{option}** position for {symbol} based on current data!")
-    
-    return option, strike_price, expiration_date, latest_data
 
-# Function to check if ticker symbol is valid
-def is_valid_ticker(symbol):
-    try:
-        stock = yf.Ticker(symbol)
-        stock.history(period="1d")  # Try to fetch stock data
-        return True
-    except Exception:
-        return False
+@st.cache_data(ttl=900, show_spinner=False)
+def load_news(symbol, _api_key):
+    response = NewsApiClient(api_key=_api_key).get_everything(
+        q=symbol, language="en", sort_by="publishedAt", page_size=5)
+    articles = [a for a in response.get("articles", []) if a.get("title") and a["title"] != "[Removed]"]
+    score = sum(TextBlob(a["title"]).sentiment.polarity for a in articles) / len(articles) if articles else None
+    return articles, score
 
-# Function to suggest closest valid symbols (based on partial match)
-def suggest_valid_symbols(symbol):
-    valid_symbols = ['AAPL', 'GOOG', 'MSFT', 'AMZN', 'TSLA', 'META', 'NVDA', 'SPY']  # Example list
-    close_matches = difflib.get_close_matches(symbol.upper(), valid_symbols, n=3, cutoff=0.6)  # Suggest closest matches
-    return close_matches
 
-# Function to fetch trending stocks based on price change
-@st.cache_data
-def get_trending_stocks():
-    symbols = ['AAPL', 'GOOG', 'MSFT', 'AMZN', 'TSLA', 'META', 'NVDA', 'SPY', 'AMD', 'NFLX']  # Add more if needed
-    trending_stocks = []
-    for symbol in symbols:
-        stock_data = fetch_stock_data(symbol)
-        recent_change = (stock_data['Close'].iloc[-1] - stock_data['Close'].iloc[-7]) / stock_data['Close'].iloc[-7]  # 7-day price change
-        if recent_change > 0.05:  # 5% increase is considered an uptrend
-            trending_stocks.append((symbol, 'Uptrend', recent_change))
-        elif recent_change < -0.05:  # 5% decrease is considered a downtrend
-            trending_stocks.append((symbol, 'Downtrend', recent_change))
-    
-    # Sort by the strongest trend
-    trending_stocks.sort(key=lambda x: abs(x[2]), reverse=True)
-    return trending_stocks[:5]  # Top 5 trending stocks
-
-# Streamlit UI
-st.title("💰 AI Stock Options Predictor 💰\n Made by Shriyan Kandula")
-
-# Disclaimer message
-st.write("**Note:** The predictions and recommendations made by this tool may not be entirely accurate and should be considered as one of many factors when making investment decisions.")
-
-symbol = st.text_input("Enter Stock Symbol", "AAPL")
-
-if symbol:
-    # Check if symbol is valid
-    if is_valid_ticker(symbol):
-        stock_data = fetch_stock_data(symbol)
-        sentiment_score = fetch_sentiment(symbol)
-        model, accuracy, X_test, y_test = train_model(stock_data)
-        option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
-
-        # Performance Metrics: Tracking model performance on test data
-        test_accuracy = track_performance(model, X_test, y_test)
-
-        # Fetch and display the real-time stock price
-        real_time_price = fetch_real_time_price(symbol)
-
-        st.subheader(f"📈 Option Recommendation for {symbol}")
-        st.write(f"**Recommended Option:** {option}")
-        st.write(f"**Strike Price:** ${strike_price}")
-        st.write(f"**Expiration Date:** {expiration}")
-        st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
-        st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-        st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
-
-        st.download_button("Download Stock Data", data=stock_data.to_csv(index=True), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
-
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI'))
-        fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
-                                     low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
-        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
-        st.plotly_chart(fig)
-
-        # Displaying the indicator values and their significance
-        st.subheader("📊 Indicator Analysis")
-        st.write(f"**RSI (Relative Strength Index):** {latest_data['RSI']:.2f} - RSI values above 70 may suggest an overbought condition (uptrend possible reversal), and below 30 may indicate an oversold condition (uptrend likely).")
-        st.write(f"**ATR (Average True Range):** {latest_data['ATR']:.2f} - A high ATR value suggests higher volatility, potentially signaling larger price movements.")
-        st.write(f"**SMA_20 (20-period Simple Moving Average):** {latest_data['SMA_20']:.2f} - A rising SMA_20 could indicate an uptrend, while a falling SMA_20 could suggest a downtrend.")
-        st.write(f"**SMA_50 (50-period Simple Moving Average):** {latest_data['SMA_50']:.2f} - A crossover above the 50-day SMA could indicate bullish movement (uptrend).")
-        st.write(f"**OBV (On-Balance Volume):** {latest_data['OBV']:.2f} - A rising OBV suggests increasing buying pressure (uptrend), while a falling OBV signals a downtrend.")
-
+def price_chart(data, style):
+    figure = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=.07, row_heights=[.76, .24])
+    if style == "Candles":
+        figure.add_trace(go.Candlestick(x=data.index, open=data.Open, high=data.High, low=data.Low,
+            close=data.Close, increasing_line_color="#56e0b4", decreasing_line_color="#fb7185", name="Price"), row=1, col=1)
     else:
-        st.error(f"Invalid ticker symbol: {symbol.upper()}. Please check the symbol and try again.")
-        suggestions = suggest_valid_symbols(symbol)
-        if suggestions:
-            st.write(f"Did you mean one of these? {', '.join(suggestions)}")
-        else:
-            st.write("No close matches found.")
+        figure.add_trace(go.Scatter(x=data.index, y=data.Close, name="Close", line=dict(color="#56e0b4", width=2),
+            fill="tozeroy", fillcolor="rgba(86,224,180,.05)"), row=1, col=1)
+    for key, color, label in [("SMA_20", "#c4b5fd", "20-day average"), ("SMA_50", "#fbbf24", "50-day average")]:
+        figure.add_trace(go.Scatter(x=data.index, y=data[key], name=label,
+            line=dict(color=color, width=1.5)), row=1, col=1)
+    figure.add_trace(go.Bar(x=data.index, y=data.Volume, name="Volume", marker_color="#294659"), row=2, col=1)
+    figure.update_layout(height=440, margin=dict(l=0, r=0, t=15, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#a2b2c7"),
+        legend=dict(orientation="h", y=1.08, x=0), xaxis_rangeslider_visible=False,
+        hovermode="x unified", dragmode="pan")
+    figure.update_xaxes(showgrid=False, rangebreaks=[dict(bounds=["sat", "mon"])])
+    figure.update_yaxes(gridcolor="#213043", zeroline=False)
+    figure.update_yaxes(tickprefix="$", row=1, col=1)
+    return figure
 
-# New Feature: Trending Stocks
-st.subheader("🚀 Trending Stocks")
-trending_stocks = get_trending_stocks()
-for stock in trending_stocks:
-    st.write(f"**{stock[0]}**: {stock[1]} ({stock[2]*100:.2f}%)")
-    stock_data = fetch_stock_data(stock[0])
-    sentiment_score = fetch_sentiment(stock[0])
-    model, accuracy, X_test, y_test = train_model(stock_data)
-    option, strike_price, expiration, _ = generate_recommendation(stock_data, sentiment_score, model, stock[0])
-    st.write(f"  - **Recommended Option:** {option} | **Strike Price:** ${strike_price} | **Expiration Date:** {expiration}")
+
+st.session_state.setdefault("selected_symbol", "AAPL")
+st.session_state.setdefault("selected_mode", "Demo")
+st.session_state.setdefault("watchlist", ["AAPL", "MSFT", "NVDA", "SPY"])
+st.session_state.setdefault("page", "Research workspace")
+with st.sidebar:
+    st.markdown('<div class="brand"><span>◈</span> InfinityTrader</div>', unsafe_allow_html=True)
+    page = st.radio("Explore", ["Research workspace", "Product & pricing"], key="page", label_visibility="collapsed")
+    st.divider()
+    if page == "Research workspace":
+        with st.form("analysis_controls"):
+            entered_symbol = st.text_input("Stock symbol", value=st.session_state.selected_symbol, max_chars=12)
+            entered_mode = st.radio("Data source", ["Demo", "Live"],
+                index=0 if st.session_state.selected_mode == "Demo" else 1, horizontal=True)
+            submitted = st.form_submit_button("Analyze stock →", width="stretch", type="primary")
+        if submitted:
+            candidate = entered_symbol.strip().upper()
+            if re.fullmatch(r"[A-Z^][A-Z0-9.^-]{0,11}", candidate):
+                st.session_state.selected_symbol = candidate
+                st.session_state.selected_mode = entered_mode
+            else:
+                st.error("Enter a ticker such as AAPL or BRK-B.")
+        st.caption("Apply changes with Analyze stock.")
+        st.divider()
+        st.caption("WATCHLIST")
+        for ticker in st.session_state.watchlist:
+            if st.button(f"{ticker}  ·  {COMPANIES.get(ticker, 'Stock')}", width="stretch"):
+                st.session_state.selected_symbol = ticker
+                st.rerun()
+        if st.button("+ Add current stock", width="stretch"):
+            if st.session_state.selected_symbol not in st.session_state.watchlist:
+                st.session_state.watchlist.append(st.session_state.selected_symbol)
+                st.rerun()
+        if st.button("Remove current stock", width="stretch"):
+            if st.session_state.selected_symbol in st.session_state.watchlist:
+                st.session_state.watchlist.remove(st.session_state.selected_symbol)
+                st.rerun()
+        st.caption("Watchlist is saved for this browser session.")
+    st.divider()
+    st.markdown("**Research with perspective.**")
+    st.caption("Price action, momentum, and model signals in one workspace.")
+    st.caption("Created by Shriyan Kandula")
+
+if page == "Product & pricing":
+    render_product_page()
+    st.stop()
+
+symbol, mode = st.session_state.selected_symbol, st.session_state.selected_mode
+title_col, source_col = st.columns([4, 1])
+with title_col:
+    st.markdown('<div class="eyebrow">YOUR MARKET WORKSPACE</div>', unsafe_allow_html=True)
+    st.title(f"{symbol} · {COMPANIES.get(symbol, 'Stock analysis')}")
+    st.caption("Price action. Clearer signals. More context.")
+with source_col:
+    label = "DEMO · SIMULATED" if mode == "Demo" else "YAHOO · DAILY DATA"
+    st.markdown(f'<div class="tag">{label}</div>', unsafe_allow_html=True)
+    if st.button("↻ Refresh data", width="stretch"):
+        load_history.clear()
+        model_result.clear()
+
+if mode == "Demo":
+    st.info("Demo workspace — prices, indicators, and model results use simulated data. Switch to Live to analyze market history.", icon="ℹ️")
+try:
+    with st.spinner(f"Analyzing {symbol}…"):
+        data = add_indicators(load_history(symbol, mode))
+        result = model_result(data)
+except Exception:
+    st.error(f"Could not analyze {symbol}. The symbol may have too little history, or the data provider may be unavailable.")
+    st.caption("Live mode needs Yahoo Finance access. Try another symbol, refresh, or use Demo to explore the dashboard.")
+    if st.button("Open demo workspace", type="primary"):
+        st.session_state.selected_mode = "Demo"
+        st.rerun()
+    st.stop()
+
+last = data.iloc[-1]
+daily_change = last.Close / data.Close.iloc[-2] - 1
+period_change = last.Close / data.Close.iloc[0] - 1
+metrics = st.columns(4)
+metrics[0].metric("Latest daily close", f"${last.Close:,.2f}", f"{daily_change:+.2%} vs previous session")
+metrics[1].metric("History return", f"{period_change:+.2%}", f"{len(data)} sessions", delta_color="off")
+metrics[2].metric("Daily volume", f"{last.Volume / 1_000_000:.1f}M", f"{last.Volume_ratio:.2f}× 20-day average", delta_color="off")
+metrics[3].metric("RSI · 14 sessions", f"{last.RSI:.1f}",
+    "Overbought" if last.RSI > 70 else "Oversold" if last.RSI < 30 else "Middle range", delta_color="off")
+st.caption(f"Last data session: {data.index[-1]:%b %d, %Y} · Live prices are split/dividend adjusted. Latest row may be an unfinished session; this is not a real-time quote.")
+
+chart_col, signal_col = st.columns([2.2, 1], gap="large")
+with chart_col, st.container(border=True):
+    st.subheader("Price & volume")
+    range_col, style_col = st.columns([2, 1])
+    window = range_col.radio("Chart range", ["1M", "3M", "6M", "1Y"], index=1,
+        horizontal=True, label_visibility="collapsed")
+    style = style_col.selectbox("Chart style", ["Candles", "Line"], label_visibility="collapsed")
+    count = {"1M": 21, "3M": 63, "6M": 126, "1Y": 252}[window]
+    st.plotly_chart(price_chart(data.tail(count), style), width="stretch",
+        config={"displaylogo": False, "scrollZoom": False})
+    st.download_button("↓ Download analysis CSV", data=data.to_csv().encode(),
+        file_name=f"{symbol}_{mode.lower()}_analysis.csv", mime="text/csv")
+with signal_col, st.container(border=True):
+    st.markdown('<div class="eyebrow">NEXT-SESSION OUTLOOK</div>', unsafe_allow_html=True)
+    signal = "Bullish lean" if result.upward_score >= .6 else "Bearish lean" if result.upward_score <= .4 else "Mixed signals"
+    color = "#56e0b4" if result.upward_score >= .6 else "#fb7185" if result.upward_score <= .4 else "#c4b5fd"
+    st.markdown(f'<div class="signal" style="color:{color}">{signal}</div>', unsafe_allow_html=True)
+    st.write(f"Upward model score · **{result.upward_score:.0%}**")
+    st.progress(result.upward_score)
+    st.caption("Random forest score for a higher next-session close. Uncalibrated; not a guaranteed probability.")
+    st.divider()
+    st.metric("Chronological validation accuracy", f"{result.accuracy:.1%}")
+    st.caption(f"Compared with a {result.baseline:.1%} majority-class baseline over {result.validation_sessions} later sessions.")
+    if result.accuracy <= result.baseline:
+        st.caption("The model did not outperform the baseline in this period.")
+    with st.expander("How the signal is evaluated"):
+        st.write("The earliest 80% of known outcomes train the evaluation model. The last 20% are held out in time order. One boundary session is excluded to prevent label leakage. A separate forecast model uses all known outcomes; no future label is invented for the latest row.")
+        st.caption(f"Training ends {result.train_end:%b %d, %Y}; validation starts {result.test_start:%b %d, %Y}. Options chains, premiums, and expiry calendars are not analyzed.")
+
+indicator_tab, model_tab, news_tab = st.tabs(["Technical indicators", "Model details", "News & sentiment"])
+with indicator_tab:
+    cols = st.columns(3)
+    cols[0].metric("20-day moving average", f"${last.SMA_20:,.2f}", f"Price {last.SMA20_gap:+.1%} vs average", delta_color="off")
+    cols[1].metric("50-day moving average", f"${last.SMA_50:,.2f}", f"Price {last.SMA50_gap:+.1%} vs average", delta_color="off")
+    cols[2].metric("Average true range · 14", f"${last.ATR:.2f}", f"{last.ATR_pct:.1%} of price", delta_color="off")
+    st.caption("RSI measures gains versus losses on a 0–100 scale. ATR includes gaps between sessions. Moving averages describe historical trends.")
+with model_tab:
+    st.write("**What influences this model**")
+    importance = result.importance.rename(index={"Return": "Daily return", "RSI": "RSI",
+        "ATR_pct": "Relative volatility", "SMA20_gap": "20-day trend", "SMA50_gap": "50-day trend", "Volume_ratio": "Relative volume"})
+    figure = go.Figure(go.Bar(x=importance.values, y=importance.index, orientation="h", marker_color="#a78bfa"))
+    figure.update_layout(height=250, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)", font_color="#a2b2c7", yaxis_autorange="reversed", xaxis_tickformat=".0%")
+    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    st.caption("Feature importance describes this model, not causation. A single historical holdout does not establish trading profitability.")
+with news_tab:
+    api_key = os.environ.get("NEWSAPI_KEY", "")
+    if mode == "Demo":
+        st.info("Live headlines are available in Live mode. Demo data has no associated news.")
+    elif not api_key:
+        st.info("Headlines aren't enabled in this workspace yet. Price analysis is still available.")
+    elif st.button("Load latest headlines"):
+        try:
+            articles, sentiment = load_news(symbol, api_key)
+            if sentiment is not None:
+                st.metric("Headline sentiment", f"{sentiment:+.2f}")
+                st.caption("TextBlob polarity from −1 to +1. Sentiment does not change the price model.")
+            for article in articles:
+                title = html.escape(article["title"])
+                url = article.get("url", "")
+                if url.startswith("https://"):
+                    st.markdown(f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">{title}</a>', unsafe_allow_html=True)
+                else:
+                    st.write(article["title"])
+            if not articles:
+                st.info("No recent headlines found.")
+        except Exception:
+            st.warning("News is unavailable. Check your NewsAPI access and try again later.")
+st.markdown('<div class="footer">InfinityTrader · Educational market research. Signals are not investment advice. Demo results describe simulated prices.</div>', unsafe_allow_html=True)
