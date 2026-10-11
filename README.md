@@ -1,6 +1,6 @@
 # InfinityTrader
 
-A Streamlit market-research prototype for individual investors, with a dark dashboard, stock watchlist, price/volume charts, technical indicators, next-session model signals, and an early-access pricing page.
+A Streamlit market-research prototype for active traders, with a dark dashboard, stock watchlist, price/volume charts, technical indicators, next-session model signals, and an early-access pricing page. The planned Pro product focuses on custom price and volatility alerts; alert scheduling and delivery are not implemented yet.
 
 ## Run
 

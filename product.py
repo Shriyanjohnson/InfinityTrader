@@ -15,8 +15,8 @@ def render_product_page():
     st.markdown('<div class="eyebrow">INFINITYTRADER · EARLY ACCESS</div>', unsafe_allow_html=True)
     left, right = st.columns([1.6, 1], gap="large")
     with left:
-        st.markdown('<div class="hero">Your next idea starts<br>with <span>better research.</span></div>', unsafe_allow_html=True)
-        st.markdown('<div class="muted">A focused workspace for individual investors. Bring price action, technical indicators, and transparent model signals into one view.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="hero">Your next move starts<br>with <span>better context.</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="muted">A focused workspace for active traders. Research your watchlist today; help shape price and volatility alerts for Pro.</div>', unsafe_allow_html=True)
         st.write("")
         st.button("Explore the workspace →", type="primary", on_click=open_workspace)
         st.caption("Try the demo immediately. No credit card required.")
@@ -41,8 +41,8 @@ def render_product_page():
     with pro, st.container(border=True):
         st.markdown('<div class="eyebrow">PRO · PLANNED FOR LAUNCH</div>', unsafe_allow_html=True)
         st.markdown("## $19 / month")
-        st.write("Proposed tools for a daily research routine.")
-        st.markdown("- Watchlists saved across devices\n- Price and volatility alerts\n- Daily research summaries\n- Longer model performance history")
+        st.write("An alert-focused plan for active traders.")
+        st.markdown("- Custom price-threshold alerts\n- Volatility alerts with clear triggers\n- Watchlists saved across devices\n- Alert history and delivery controls")
         st.caption("These Pro features are planned and are not included in the current app.")
     st.write("")
     with st.container(border=True):
