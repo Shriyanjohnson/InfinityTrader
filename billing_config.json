@@ -1,0 +1,9 @@
+{
+  "status": "planned",
+  "payment_method": "bitcoin",
+  "network": "bitcoin-mainnet",
+  "receiving_address": "18mJqcLYWSjJHHTw5RznAToPHW8cPqRizz",
+  "receiving_uri": "bitcoin:18mJqcLYWSjJHHTw5RznAToPHW8cPqRizz",
+  "pro_price_usd": 19,
+  "access_period_days": 30
+}

@@ -42,6 +42,6 @@ RSI uses exponentially smoothed gains/losses; ATR includes overnight gaps. Indic
 
 ## Product status
 
-Explorer is implemented. The pricing page proposes a $19/month Pro subscription for feedback and marks Pro features as planned; it does not charge customers. Early-access signups require consent and are saved in SQLite under `INFINITY_DATA_DIR`, or `XDG_DATA_HOME/infinitytrader`. Emails are not sent. The database is outside source control; protect it, preserve it across deploys, and support deletion requests.
+Explorer is implemented. The pricing page proposes $19 for 30 days of Pro access, payable in Bitcoin at an invoice-time exchange rate. Pro features and checkout are planned; the app does not request transfers or verify payments yet. Public merchant settings, including the user-supplied mainnet receiving address, are stored in `billing_config.json`. No private keys belong in this project. Early-access signups require consent and are saved in SQLite under `INFINITY_DATA_DIR`, or `XDG_DATA_HOME/infinitytrader`. Emails are not sent. The database is outside source control; protect it, preserve it across deploys, and support deletion requests.
 
 Before paid launch, implement authentication, a managed user database, verified billing and subscription entitlements, monitoring, and privacy/terms pages. Select a market/news-data provider whose plan permits commercial display and redistribution. The Yahoo development integration does not establish those rights. See [LAUNCH_PLAN.md](LAUNCH_PLAN.md).

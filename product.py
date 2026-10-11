@@ -1,10 +1,13 @@
 from pathlib import Path
+import json
 import os
 import sqlite3
 
 import streamlit as st
 
 from early_access import save_signup
+
+BILLING = json.loads(Path(__file__).with_name("billing_config.json").read_text())
 
 
 def open_workspace():
@@ -19,7 +22,7 @@ def render_product_page():
         st.markdown('<div class="muted">A focused workspace for active traders. Research your watchlist today; help shape price and volatility alerts for Pro.</div>', unsafe_allow_html=True)
         st.write("")
         st.button("Explore the workspace →", type="primary", on_click=open_workspace)
-        st.caption("Try the demo immediately. No credit card required.")
+        st.caption("Try the demo immediately. No payment required.")
     with right, st.container(border=True):
         st.markdown("### Research with perspective")
         st.write("**01 · See the full picture**")
@@ -40,7 +43,8 @@ def render_product_page():
         st.button("Open free workspace", on_click=open_workspace, width="stretch")
     with pro, st.container(border=True):
         st.markdown('<div class="eyebrow">PRO · PLANNED FOR LAUNCH</div>', unsafe_allow_html=True)
-        st.markdown("## $19 / month")
+        st.markdown(f"## ${BILLING['pro_price_usd']} / 30 days")
+        st.caption("Bitcoin payments planned for launch. The BTC amount will be quoted at checkout.")
         st.write("An alert-focused plan for active traders.")
         st.markdown("- Custom price-threshold alerts\n- Volatility alerts with clear triggers\n- Watchlists saved across devices\n- Alert history and delivery controls")
         st.caption("These Pro features are planned and are not included in the current app.")
