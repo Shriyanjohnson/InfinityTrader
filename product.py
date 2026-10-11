@@ -44,7 +44,7 @@ def render_product_page():
     with pro, st.container(border=True):
         st.markdown('<div class="eyebrow">PRO · PLANNED FOR LAUNCH</div>', unsafe_allow_html=True)
         st.markdown(f"## ${BILLING['pro_price_usd']} / 30 days")
-        st.caption("Bitcoin payments planned for launch. The BTC amount will be quoted at checkout.")
+        st.caption("Pay in Bitcoin. The BTC amount will be quoted at checkout; access starts after 3 blockchain confirmations. Checkout is not available yet.")
         st.write("An alert-focused plan for active traders.")
         st.markdown("- Custom price-threshold alerts\n- Volatility alerts with clear triggers\n- Watchlists saved across devices\n- Alert history and delivery controls")
         st.caption("These Pro features are planned and are not included in the current app.")

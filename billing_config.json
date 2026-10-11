@@ -4,6 +4,9 @@
   "network": "bitcoin-mainnet",
   "receiving_address": "18mJqcLYWSjJHHTw5RznAToPHW8cPqRizz",
   "receiving_uri": "bitcoin:18mJqcLYWSjJHHTw5RznAToPHW8cPqRizz",
-  "pro_price_usd": 19,
-  "access_period_days": 30
+  "pro_price_usd": 5,
+  "access_period_days": 30,
+  "invoice_expiry_minutes": 15,
+  "required_confirmations": 3,
+  "blockchain_api_url": "https://blockstream.info/api"
 }

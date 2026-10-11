@@ -32,7 +32,7 @@ export XDG_DATA_HOME=/workspace/.local/share/InfinityTrader
 python -m unittest discover -s tests -v
 ```
 
-Tests cover indicator edge cases, chronological evaluation boundaries, unknown future labels, single-class forecasts, signups, dashboard interactions, and graceful provider failure. Live-provider availability and browser rendering are checked separately.
+The 37 tests cover indicators, model evaluation, signups, dashboard interactions, and Bitcoin billing: purchase ownership, quoted amounts, recipient matching, purchase timing, prior transactions, chain confirmations, replay protection, concurrent checks, and 30-day expiry. Live-provider availability and browser rendering are checked separately.
 
 ## Model
 
@@ -42,6 +42,19 @@ RSI uses exponentially smoothed gains/losses; ATR includes overnight gaps. Indic
 
 ## Product status
 
-Explorer is implemented. The pricing page proposes $19 for 30 days of Pro access, payable in Bitcoin at an invoice-time exchange rate. Pro features and checkout are planned; the app does not request transfers or verify payments yet. Public merchant settings, including the user-supplied mainnet receiving address, are stored in `billing_config.json`. No private keys belong in this project. Early-access signups require consent and are saved in SQLite under `INFINITY_DATA_DIR`, or `XDG_DATA_HOME/infinitytrader`. Emails are not sent. The database is outside source control; protect it, preserve it across deploys, and support deletion requests.
+Explorer is implemented. Pricing is $5 for 30 days, payable in Bitcoin at a server-obtained invoice-time exchange rate. The pricing page remains a launch preview; customer checkout is disabled. Public merchant settings, including the supplied mainnet receiving address, are in `billing_config.json`. No private keys belong in this project. Early-access signups require consent and are saved in SQLite under `INFINITY_DATA_DIR`, or `XDG_DATA_HOME/infinitytrader`. Emails are not sent. Keep user databases outside source control and support deletion requests.
 
-Before paid launch, implement authentication, a managed user database, verified billing and subscription entitlements, monitoring, and privacy/terms pages. Select a market/news-data provider whose plan permits commercial display and redistribution. The Yahoo development integration does not establish those rights. See [LAUNCH_PLAN.md](LAUNCH_PLAN.md).
+## Bitcoin verification backend
+
+`billing.py` implements invoice creation and blockchain verification. It must be called using a trusted authenticated account ID, a server-obtained BTC/USD rate, and a database outside the repository; it is not yet connected to customer checkout or dashboard access controls.
+
+- Each invoice records the receiving address, exact satoshi amount for $5 (rounded up by at most one satoshi), server creation/expiry times, chain height, and existing unconfirmed transactions.
+- The quote lasts 15 minutes. Existing confirmed or unconfirmed payments cannot be reused. Matching amounts on the static address are reserved so overlapping purchases cannot claim the same payment.
+- Verification obtains transaction outputs, block status, canonical block hash, and chain height from the HTTPS blockchain API; a supplied transaction ID alone never grants access.
+- The recipient and exact amount must match. A newly confirmed payment must postdate the purchase and be mined inside its quote window, or have been observed by the server in that window before confirming later. Block timestamps are approximate; this deliberately conservative policy can require manual review for legitimate clock/skew or replacement-transaction cases.
+- Three confirmations are required. Access lasts 30 days from verification; early renewal adds 30 days to existing access. Atomic writes and a unique paid transaction ID prevent replay and duplicate extension from concurrent checks.
+- Already-paid invoices return their original entitlement on retry. Three-confirmation settlement is treated as final by this prototype; ongoing reorganization monitoring/revocation is not implemented.
+
+`BlockstreamClient` needs network access to `blockstream.info`. Blockchain API failures leave access locked. A static-address design limits concurrency and cannot independently prove the sender's identity. Before public launch, connect verified sign-in, obtain a reliable exchange-rate quote, provide payment observation/reconciliation and manual review, and migrate to unique per-purchase addresses or an invoice service for scale. An observed payment awaiting confirmation retains its amount reservation until resolved.
+
+Before paid launch, connect authentication, the verifier, and dashboard entitlements; add a managed user database, monitoring, and privacy/terms pages. Select a market/news-data provider whose plan permits commercial display and redistribution. The Yahoo development integration does not establish those rights. See [LAUNCH_PLAN.md](LAUNCH_PLAN.md).
