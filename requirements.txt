@@ -1,0 +1,12 @@
+numpy
+pandas
+yfinance
+scikit-learn
+plotly>=5.0
+textblob
+beautifulsoup4
+requests
+streamlit>=1.28.0
+newsapi-python
+altair<5
+
