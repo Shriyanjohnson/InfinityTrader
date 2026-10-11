@@ -9,7 +9,7 @@ import yfinance as yf
 from newsapi import NewsApiClient
 from textblob import TextBlob
 
-from analytics import add_indicators, analyze, demo_history
+from analytics import add_indicators, analyze, completed_history, demo_history
 from product import render_product_page
 
 st.set_page_config(page_title="InfinityTrader · Market research", page_icon="📈", layout="wide")
@@ -43,10 +43,10 @@ COMPANIES = {"AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOG": "Al
 def load_history(symbol, mode):
     if mode == "Demo":
         return demo_history(symbol)
-    history = yf.Ticker(symbol).history(period="1y", auto_adjust=True, raise_errors=True, timeout=12)
+    history = yf.Ticker(symbol).history(period="5y", auto_adjust=True, raise_errors=True, timeout=12)
     if history.empty:
         raise ValueError("No history returned for this symbol.")
-    return history
+    return completed_history(history)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -167,7 +167,7 @@ metrics[1].metric("History return", f"{period_change:+.2%}", f"{len(data)} sessi
 metrics[2].metric("Daily volume", f"{last.Volume / 1_000_000:.1f}M", f"{last.Volume_ratio:.2f}× 20-day average", delta_color="off")
 metrics[3].metric("RSI · 14 sessions", f"{last.RSI:.1f}",
     "Overbought" if last.RSI > 70 else "Oversold" if last.RSI < 30 else "Middle range", delta_color="off")
-st.caption(f"Last data session: {data.index[-1]:%b %d, %Y} · Live prices are split/dividend adjusted. Latest row may be an unfinished session; this is not a real-time quote.")
+st.caption(f"Last data session: {data.index[-1]:%b %d, %Y} · Live prices are split/dividend adjusted. Today's candle is excluded; daily data is not a real-time quote.")
 
 chart_col, signal_col = st.columns([2.2, 1], gap="large")
 with chart_col, st.container(border=True):
@@ -188,14 +188,16 @@ with signal_col, st.container(border=True):
     st.markdown(f'<div class="signal" style="color:{color}">{signal}</div>', unsafe_allow_html=True)
     st.write(f"Upward model score · **{result.upward_score:.0%}**")
     st.progress(result.upward_score)
-    st.caption("Random forest score for a higher next-session close. Uncalibrated; not a guaranteed probability.")
+    st.caption(f"{result.model_name} score for a higher next-session close. Uncalibrated; not a guaranteed probability.")
     st.divider()
     st.metric("Chronological validation accuracy", f"{result.accuracy:.1%}")
     st.caption(f"Compared with a {result.baseline:.1%} majority-class baseline over {result.validation_sessions} later sessions.")
     if result.accuracy <= result.baseline:
         st.caption("The model did not outperform the baseline in this period.")
     with st.expander("How the signal is evaluated"):
-        st.write("The earliest 80% of known outcomes train the evaluation model. The last 20% are held out in time order. One boundary session is excluded to prevent label leakage. A separate forecast model uses all known outcomes; no future label is invented for the latest row.")
+        st.write("Three earlier chronological folds select between historical frequency, regularized logistic regression, and random forest using Brier loss. The model family is then fixed. The final 20% are evaluated in three successive blocks, retraining only on known earlier outcomes with one boundary session excluded. The latest forecast is fitted afterward on all known outcomes.")
+        st.caption(f"Brier loss: {result.brier:.3f}; historical-frequency baseline: {result.baseline_brier:.3f}. Lower is better; this measures score quality, not trading returns.")
+        st.dataframe(result.folds, hide_index=True, width="stretch")
         st.caption(f"Training ends {result.train_end:%b %d, %Y}; validation starts {result.test_start:%b %d, %Y}. Options chains, premiums, and expiry calendars are not analyzed.")
 
 indicator_tab, model_tab, news_tab = st.tabs(["Technical indicators", "Model details", "News & sentiment"])
@@ -207,13 +209,22 @@ with indicator_tab:
     st.caption("RSI measures gains versus losses on a 0–100 scale. ATR includes gaps between sessions. Moving averages describe historical trends.")
 with model_tab:
     st.write("**What influences this model**")
-    importance = result.importance.rename(index={"Return": "Daily return", "RSI": "RSI",
-        "ATR_pct": "Relative volatility", "SMA20_gap": "20-day trend", "SMA50_gap": "50-day trend", "Volume_ratio": "Relative volume"})
+    importance = result.importance.head(8).rename(index={"Return": "Daily return", "RSI": "RSI",
+        "ATR_pct": "Relative volatility", "SMA20_gap": "20-day trend", "SMA50_gap": "50-day trend", "Volume_ratio": "Relative volume",
+        "Return_lag1": "Previous daily return", "Return_lag2": "Return two sessions ago",
+        "Momentum5": "5-day momentum", "Momentum20": "20-day momentum",
+        "Volatility10": "10-day volatility", "Volatility20": "20-day volatility",
+        "RSI_delta5": "5-day RSI change", "MACD_pct": "Relative MACD",
+        "Range_pct": "Daily price range", "Close_position": "Close within daily range",
+        "Gap_open": "Opening gap", "Body_pct": "Open-to-close return"})
     figure = go.Figure(go.Bar(x=importance.values, y=importance.index, orientation="h", marker_color="#a78bfa"))
     figure.update_layout(height=250, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)", font_color="#a2b2c7", yaxis_autorange="reversed", xaxis_tickformat=".0%")
     st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
-    st.caption("Feature importance describes this model, not causation. A single historical holdout does not establish trading profitability.")
+    if result.model_name == "Historical frequency":
+        st.caption("Earlier validation favored historical frequency. Its score uses the fraction of rising sessions; individual indicators have no assigned influence.")
+    else:
+        st.caption("Top eight relative influences: forest importance or absolute standardized logistic coefficients. These describe the model, not causation. Historical evaluation does not establish trading profitability.")
 with news_tab:
     api_key = os.environ.get("NEWSAPI_KEY", "")
     if mode == "Demo":

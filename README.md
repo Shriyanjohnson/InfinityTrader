@@ -13,7 +13,7 @@ pip install -r requirements.txt
 streamlit run main.py
 ```
 
-Enter a symbol, choose Demo or Live, and press **Analyze stock**. Demo starts without credentials and labels simulated prices. Live loads one year of daily adjusted Yahoo history and never silently substitutes demo data. Daily prices can include an unfinished session and are not real-time quotes. Switch chart ranges and styles, refresh cached prices, and download an analysis CSV.
+Enter a symbol, choose Demo or Live, and press **Analyze stock**. Demo starts without credentials and labels simulated prices. Live loads up to five years of daily adjusted Yahoo history and never silently substitutes demo data. The current New York day's candle is excluded; daily prices are not real-time quotes. Switch chart ranges and styles, refresh cached prices, and download an analysis CSV.
 
 The sidebar watchlist lasts for the browser session. News is optional: configure `NEWSAPI_KEY` through secure environment settings, then request headlines in Live mode. News sentiment is independent of the price model. Never commit secrets or `.env` files.
 
@@ -36,9 +36,9 @@ The 37 tests cover indicators, model evaluation, signups, dashboard interactions
 
 ## Model
 
-The random forest predicts whether the next session's close is higher. Evaluation trains on the earliest 80% of known outcomes, excludes one boundary session whose label would reach into validation, and tests the final 20% in chronological order. A separate forecast model uses all known outcomes. The dashboard compares validation accuracy with a majority-class baseline.
+The model estimates whether the next session's close is higher using 18 historical return, momentum, volatility, volume, trend, and candle features. Live analysis requests up to five years of adjusted daily prices. Three chronological folds within the earliest 80% select historical frequency, regularized logistic regression, or random forest by Brier loss (lower is better). Scaling is fitted inside each training fold. The selected family stays fixed while the final 20% are evaluated across three successive blocks. Each block refits on earlier known outcomes, excluding one boundary session to prevent label leakage. A separate forecast model uses all known outcomes afterward. The dashboard reports accuracy and Brier loss against a baseline refitted on the same training windows; it can select historical frequency when learned models add no signal during selection.
 
-RSI uses exponentially smoothed gains/losses; ATR includes overnight gaps. Indicators use historical data only. Model scores are uncalibrated and one holdout is limited evidence. This app does not analyze options chains, premiums, liquidity, or expiry calendars and does not generate arbitrary option strikes.
+RSI uses exponentially smoothed gains/losses; ATR includes overnight gaps. Indicators use historical data only. Live analysis conservatively excludes the current New York calendar day's candle, even after market close, and forecasts from the last completed prior session. Model scores are uncalibrated; three historical evaluation blocks are limited evidence and do not establish profitability after costs. This app does not analyze options chains, premiums, liquidity, or expiry calendars and does not generate arbitrary option strikes.
 
 ## Product status
 

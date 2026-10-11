@@ -1,10 +1,12 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
 from analytics import (add_indicators, analyze, chronological_split,
-                       demo_history, normalize_history, supervised_data)
+                       demo_history, normalize_history, supervised_data,
+                       select_model, walk_forward_splits, completed_history, FEATURES)
 
 
 def constant_path(step):
@@ -15,6 +17,16 @@ def constant_path(step):
 
 
 class IndicatorTests(unittest.TestCase):
+    def test_today_and_future_candles_are_excluded(self):
+        history = constant_path(1)
+        day = history.index[-2]
+        result = completed_history(history, day.tz_localize("America/New_York") + pd.Timedelta(hours=12))
+        pd.testing.assert_frame_equal(result, history.iloc[:-2])
+        aware = history.copy()
+        aware.index = aware.index.tz_localize("America/New_York")
+        result = completed_history(aware, day.tz_localize("America/New_York") + pd.Timedelta(hours=20))
+        pd.testing.assert_frame_equal(result, aware.iloc[:-2])
+
     def test_rsi_monotonic_and_flat_edge_cases(self):
         for step, expected in [(1, 100), (-1, 0), (0, 50)]:
             with self.subTest(step=step):
@@ -83,12 +95,59 @@ class ModelTests(unittest.TestCase):
     def test_result_reports_real_holdout_count_and_baseline(self):
         data = add_indicators(demo_history("AAPL"))
         features, labels = supervised_data(data)
-        _, test_x, train_y, test_y = chronological_split(features, labels)
+        _, test_x, _, _ = chronological_split(features, labels)
         result = analyze(data)
         self.assertEqual(result.validation_sessions, len(test_x))
-        self.assertAlmostEqual(result.baseline, (test_y == int(train_y.mean() >= .5)).mean())
+        actual, predictions = [], []
+        for train, test in walk_forward_splits(features):
+            actual.extend(labels.iloc[test])
+            predictions.extend(np.full(len(test), labels.iloc[train].mean() >= .5))
+        self.assertAlmostEqual(result.baseline, np.mean(np.asarray(actual) == predictions))
         self.assertTrue(0 <= result.upward_score <= 1)
         self.assertTrue(0 <= result.accuracy <= 1)
+        self.assertTrue(0 <= result.brier <= 1)
+        self.assertTrue(0 <= result.baseline_brier <= 1)
+
+    def test_walk_forward_has_no_overlap_and_purges_each_boundary(self):
+        features, _ = supervised_data(add_indicators(demo_history("AAPL")))
+        tested = []
+        previous_train_size = 0
+        for train, test in walk_forward_splits(features):
+            self.assertEqual(test[0] - train[-1], 2)
+            self.assertGreater(len(train), previous_train_size)
+            previous_train_size = len(train)
+            tested.extend(test)
+        self.assertEqual(tested, list(range(int(len(features) * .8), len(features))))
+
+    def test_model_selection_never_sees_final_evaluation_labels(self):
+        data = add_indicators(demo_history("AAPL"))
+        features, labels = supervised_data(data)
+        train_x, _, train_y, _ = chronological_split(features, labels)
+        with patch("analytics.select_model", wraps=select_model) as selection:
+            analyze(data)
+        selection.assert_called_once()
+        pd.testing.assert_frame_equal(selection.call_args.args[0], train_x)
+        pd.testing.assert_series_equal(selection.call_args.args[1], train_y)
+
+    def test_selection_is_unchanged_when_later_outcomes_change(self):
+        data = add_indicators(demo_history("AAPL"))
+        features, labels = supervised_data(data)
+        start = int(len(features) * .8)
+        changed = labels.copy()
+        changed.iloc[start:] = 1 - changed.iloc[start:]
+        with patch("analytics.supervised_data", return_value=(features, labels)):
+            original = analyze(data)
+        with patch("analytics.supervised_data", return_value=(features, changed)):
+            altered = analyze(data)
+        self.assertEqual(original.model_name, altered.model_name)
+        pd.testing.assert_series_equal(original.selection_scores, altered.selection_scores)
+
+    def test_added_features_are_finite_for_flat_candles(self):
+        source = constant_path(0)
+        source["High"] = source["Low"] = source["Close"]
+        data = add_indicators(source)
+        self.assertEqual(data.Close_position.iloc[-1], .5)
+        self.assertTrue(np.isfinite(data[FEATURES].iloc[-1]).all())
 
 
 if __name__ == "__main__":
