@@ -2,6 +2,8 @@ import html
 import os
 import re
 
+import pandas as pd
+
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
@@ -11,6 +13,7 @@ from textblob import TextBlob
 
 from analytics import add_indicators, analyze, completed_history, demo_history
 from product import render_product_page
+from journal_view import render_forecast_journal
 
 st.set_page_config(page_title="InfinityTrader · Market research", page_icon="📈", layout="wide")
 st.markdown("""
@@ -168,6 +171,10 @@ metrics[2].metric("Daily volume", f"{last.Volume / 1_000_000:.1f}M", f"{last.Vol
 metrics[3].metric("RSI · 14 sessions", f"{last.RSI:.1f}",
     "Overbought" if last.RSI > 70 else "Oversold" if last.RSI < 30 else "Middle range", delta_color="off")
 st.caption(f"Last data session: {data.index[-1]:%b %d, %Y} · Live prices are split/dividend adjusted. Today's candle is excluded; daily data is not a real-time quote.")
+if mode == "Live":
+    age = (pd.Timestamp.now(tz="America/New_York").date() - data.index[-1].date()).days
+    if age > 7:
+        st.warning(f"Price history is {age} calendar days old. Refresh or check the provider before relying on this outlook.")
 
 chart_col, signal_col = st.columns([2.2, 1], gap="large")
 with chart_col, st.container(border=True):
@@ -200,7 +207,7 @@ with signal_col, st.container(border=True):
         st.dataframe(result.folds, hide_index=True, width="stretch")
         st.caption(f"Training ends {result.train_end:%b %d, %Y}; validation starts {result.test_start:%b %d, %Y}. Options chains, premiums, and expiry calendars are not analyzed.")
 
-indicator_tab, model_tab, news_tab = st.tabs(["Technical indicators", "Model details", "News & sentiment"])
+indicator_tab, model_tab, news_tab, journal_tab = st.tabs(["Technical indicators", "Model details", "News & sentiment", "Forecast journal"])
 with indicator_tab:
     cols = st.columns(3)
     cols[0].metric("20-day moving average", f"${last.SMA_20:,.2f}", f"Price {last.SMA20_gap:+.1%} vs average", delta_color="off")
@@ -248,4 +255,6 @@ with news_tab:
                 st.info("No recent headlines found.")
         except Exception:
             st.warning("News is unavailable. Check your NewsAPI access and try again later.")
+with journal_tab:
+    render_forecast_journal(symbol, mode, data, result)
 st.markdown('<div class="footer">InfinityTrader · Educational market research. Signals are not investment advice. Demo results describe simulated prices.</div>', unsafe_allow_html=True)

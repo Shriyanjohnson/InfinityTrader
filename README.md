@@ -32,7 +32,15 @@ export XDG_DATA_HOME=/workspace/.local/share/InfinityTrader
 python -m unittest discover -s tests -v
 ```
 
-The 37 tests cover indicators, model evaluation, signups, dashboard interactions, and Bitcoin billing: purchase ownership, quoted amounts, recipient matching, purchase timing, prior transactions, chain confirmations, replay protection, concurrent checks, and 30-day expiry. Live-provider availability and browser rendering are checked separately.
+The tests cover indicators, model evaluation, forecast snapshots and outcome eligibility, signups, dashboard interactions, and Bitcoin billing: purchase ownership, quoted amounts, recipient matching, purchase timing, prior transactions, chain confirmations, replay protection, concurrent checks, and 30-day expiry. Live-provider availability and browser rendering are checked separately.
+
+## Forecast journal
+
+Open the **Forecast journal** tab in Live mode and choose **Save this forecast**. The first snapshot for each symbol and source session is immutable: reruns, repeated saves, and model updates cannot rewrite its score. Snapshots include the server recording time, model family, analytics source revision hash, input fingerprint, and historical-frequency baseline from the same known outcomes. The current dashboard layout, model selection, and Bitcoin billing behavior are preserved.
+
+Refresh analysis after a later completed session to resolve that symbol's pending snapshots. Direction accuracy and Brier loss include only snapshots recorded strictly before the next observed session's 9:30 a.m. New York open. Late recordings remain visible and are excluded from metrics. Weekend and holiday handling uses the actual next session in provider history; no weekday is assumed to be a trading session. The journal supports US regular-session histories with New York exchange timestamps. Outcomes compare source and target prices from the same adjusted history to handle splits, then stay fixed; provider gaps or revisions remain limitations. Small samples and selectively saved forecasts do not establish a predictive edge or profitability.
+
+The journal is shared by this app instance, with no account isolation. It stores no trades, places no orders, and is separate from billing. Demo data is never saved. SQLite snapshots live at `INFINITY_DATA_DIR/forecast_journal.sqlite3`, or `XDG_DATA_HOME/infinitytrader/forecast_journal.sqlite3` (default `~/.local/share/infinitytrader`). Preserve this file across restarts and keep it out of Git. Recording requires writable persistent storage; storage failures leave analysis available. There is no background scheduler: outcomes update when the corresponding symbol's Live analysis reruns. The tab provides a CSV export of all snapshots for that symbol. Live price histories more than seven calendar days old are flagged on the dashboard.
 
 ## Model
 
