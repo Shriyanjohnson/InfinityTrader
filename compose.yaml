@@ -1,0 +1,35 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: ${INFINITY_ENV_FILE:-.env}
+    environment:
+      INFINITY_MODE: beta
+      INFINITY_DATA_DIR: /data
+      INFINITY_ENFORCE_PUBLIC_PREFLIGHT: "1"
+      INFINITY_TRUSTED_PROXY: "1"
+    volumes:
+      - beta-data:/data
+    expose:
+      - "8501"
+    mem_limit: 2g
+    cpus: 2
+  https:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?Set PUBLIC_HOST to your real beta domain}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+volumes:
+  beta-data:
+  caddy-data:
+  caddy-config:

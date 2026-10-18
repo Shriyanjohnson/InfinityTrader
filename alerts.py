@@ -63,6 +63,9 @@ def save_rule(database, symbol, metric, comparison, threshold, trigger_style="co
             return existing[0], False
         if connection.execute("SELECT count(*) FROM alert_rules WHERE symbol=?", (symbol,)).fetchone()[0] >= 20:
             raise ValueError("Keep at most 20 rules per symbol. Remove a rule before adding another.")
+        distinct = connection.execute("SELECT DISTINCT symbol FROM alert_rules").fetchall()
+        if symbol not in {row[0] for row in distinct} and len(distinct) >= 20:
+            raise ValueError("Keep alert rules for at most 20 symbols per workspace.")
         identifier = uuid.uuid4().hex
         connection.execute("INSERT INTO alert_rules VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
                            (identifier, symbol, metric, comparison, threshold, trigger_style, _now(now).isoformat()))

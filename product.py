@@ -6,6 +6,7 @@ import sqlite3
 import streamlit as st
 
 from early_access import save_signup
+from settings import development, free_beta
 
 BILLING = json.loads(Path(__file__).with_name("billing_config.json").read_text())
 
@@ -33,7 +34,14 @@ def render_product_page():
         st.caption("A session watchlist, CSV exports, and optional news headlines.")
     st.divider()
     st.subheader("Start exploring. Help shape what comes next.")
-    st.caption("Pro pricing is a proposal for early feedback. Paid subscriptions are not available yet.")
+    st.caption("Pro pricing is a proposal for early feedback. Paid subscriptions are not available yet." if development() else "Beta access and account-bound Bitcoin access settings.")
+    if not development():
+        st.info("Free beta access is active; no payment is requested." if free_beta() else "Demo is free. Live research and background checks require confirmed $5 / 30-day Bitcoin access.")
+        st.write("**Research:** chart controls, private watchlists, forecast journals, daily alert rules, and CSV exports. **Beta/Pro:** background daily alert checks and an in-app match inbox while the worker is running. Signed-in beta access is free during the test phase; paid mode enforces the confirmed 30-day term for Live and background checks.")
+        from checkout import render_checkout
+        render_checkout(st.session_state.get("_principal") or None)
+        st.caption("Create an account through Account. Read Beta guide & feedback for privacy, terms, known limitations, and support. No public email signup list is collected in this release.")
+        return
     free, pro = st.columns(2, gap="large")
     with free, st.container(border=True):
         st.markdown('<div class="eyebrow">EXPLORER · AVAILABLE NOW</div>', unsafe_allow_html=True)

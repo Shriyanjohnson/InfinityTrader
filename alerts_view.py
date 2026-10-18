@@ -5,6 +5,8 @@ import sqlite3
 
 import pandas as pd
 import streamlit as st
+from settings import workspace_directory
+from exports import csv_bytes
 
 from alerts import METRICS, check_alerts, read_events, remove_rule, save_rule, set_enabled
 
@@ -15,16 +17,16 @@ def _threshold_label(metric, value):
 
 def render_alerts(symbol, mode, data):
     st.write("**Daily price & indicator alerts**")
-    st.caption("Rules check the latest completed daily session whenever this symbol's analysis reruns. New rules check that session immediately. These are in-app alerts; background monitoring, email, and push delivery are not enabled.")
+    st.caption("Rules check the latest completed daily session on analysis reruns. A configured beta/Pro worker also checks while you are away; matches appear in this inbox. New rules check the latest completed session immediately. There is no intraday monitoring, email, or push delivery.")
     if mode == "Demo":
         st.info("Switch to Live to create daily alerts. Simulated prices never trigger saved rules.")
         return
     if str(data.index.tz) != "America/New_York":
         st.info("Daily alerts currently support US histories with New York exchange timestamps.")
         return
-    directory = Path(os.environ.get("INFINITY_DATA_DIR", Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "infinitytrader"))
+    directory = workspace_directory()
     database = directory / "alerts.sqlite3"
-    st.caption("Rules and event history are shared by this app instance. Stale or unfinished sessions cannot trigger alerts. Thresholds use split/dividend-adjusted prices; review fixed price thresholds after corporate actions.")
+    st.caption("Signed-in beta accounts have private rules and history. Stale or unfinished sessions cannot trigger alerts. Thresholds use split/dividend-adjusted prices; review fixed price thresholds after corporate actions.")
     metric = st.selectbox("Alert metric", list(METRICS), format_func=METRICS.get, key=f"alert_metric_{symbol}")
     defaults = {"Close": (0.0001, 1_000_000_000., max(.0001, round(float(data.Close.iloc[-1]), 4)), .01),
                 "RSI": (0., 100., 70., 1.), "Volume_ratio": (0., 1_000_000., 1.5, .1), "ATR_pct": (0., 10_000., 3., .1)}
@@ -83,5 +85,5 @@ def render_alerts(symbol, mode, data):
         "comparison": "Condition", "threshold": "Threshold", "observed_value": "Observed", "trigger_style": "Trigger style"})
     st.dataframe(display, hide_index=True, width="stretch")
     st.caption(f"Showing up to 100 of {len(events)} recorded matches. These report daily conditions, not executed trades.")
-    st.download_button("↓ Download alert history CSV", events.to_csv(index=False).encode(),
+    st.download_button("↓ Download alert history CSV", csv_bytes(events),
                        file_name=f"{symbol}_alert_history.csv", mime="text/csv")

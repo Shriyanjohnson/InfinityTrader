@@ -21,6 +21,11 @@ def by_label(elements, label):
 
 
 class AppTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch.dict(os.environ, {"INFINITY_MODE": "development"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_demo_render_and_interactions_require_no_network(self):
         with patch("yfinance.Ticker.history", side_effect=RuntimeError("Network must not be used")) as history:
             app = AppTest.from_file(APP, default_timeout=30).run()

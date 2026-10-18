@@ -7,6 +7,8 @@ import pandas as pd
 import streamlit as st
 
 from analytics import supervised_data
+from settings import workspace_directory
+from exports import csv_bytes
 from forecast_journal import (filter_forecasts, performance, performance_trend,
                               read_forecasts, record_forecast, settle_forecasts)
 
@@ -20,9 +22,9 @@ def render_forecast_journal(symbol, mode, data, result):
     if str(data.index.tz) != "America/New_York":
         st.info("The journal currently supports US daily histories with New York exchange timestamps. Analysis and CSV downloads remain available for other markets.")
         return
-    directory = Path(os.environ.get("INFINITY_DATA_DIR", Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "infinitytrader"))
+    directory = workspace_directory()
     database = directory / "forecast_journal.sqlite3"
-    st.caption("This journal is shared across this app instance. It is not a private account history. Performance covers US stocks and ETFs with a regular 9:30 a.m. New York open.")
+    st.caption("Performance covers US stocks and ETFs with a regular 9:30 a.m. New York open. Signed-in beta accounts have private journals.")
     try:
         if st.button("Save this forecast", key="save_forecast"):
             _, labels = supervised_data(data)
@@ -66,7 +68,7 @@ def render_forecast_journal(symbol, mode, data, result):
     mismatched = int((records.outcome.notna() & ~records.session_match).sum())
     if mismatched:
         st.warning(f"{mismatched} saved outcomes do not match the next exchange session and are excluded from performance. Their original snapshots are preserved.")
-    st.caption(f"{pending} awaiting a later completed session · {late} late snapshots excluded. Only snapshots recorded before the next scheduled US exchange session opens count. Missing target prices leave a forecast pending. Refreshing analysis checks this symbol's outcomes; there is no background scheduler.")
+    st.caption(f"{pending} awaiting a later completed session · {late} late snapshots excluded. Only snapshots recorded before the next scheduled US exchange session opens count. Missing target prices leave a forecast pending. Outcomes update on Live analysis reruns and configured beta/Pro worker checks.")
     display = records[["source_session", "recorded_at", "model_name", "upward_score", "target_session", "actual_return"]].copy()
     display["recorded_at"] = pd.to_datetime(display.recorded_at, utc=True).dt.strftime("%Y-%m-%d %H:%M:%S")
     display["target_session"] = display.target_session.fillna("Pending")
@@ -78,6 +80,6 @@ def render_forecast_journal(symbol, mode, data, result):
     st.dataframe(display, hide_index=True, width="stretch", column_config={
         "Upward score": st.column_config.NumberColumn(format="percent"),
         "Next-session return": st.column_config.NumberColumn(format="percent")})
-    st.download_button("↓ Download forecast journal CSV", records.to_csv(index=False).encode(),
+    st.download_button("↓ Download forecast journal CSV", csv_bytes(records),
         file_name=f"{symbol}_forecast_journal.csv", mime="text/csv")
     st.caption("Resolved outcomes use source and next-session prices from the same adjusted history, then stay fixed. Provider revisions may change later comparisons. CSV includes model revision and input fingerprint for each snapshot.")

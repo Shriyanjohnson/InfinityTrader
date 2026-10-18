@@ -1,7 +1,7 @@
 """Purchase-linked Bitcoin verification. Call only with a trusted signed-in user ID.
 
-This backend does not authenticate users, accept private keys, or send funds.
-It is not connected to customer checkout until account authentication is added.
+Authentication is provided by accounts.py; checkout and reconciliation call this
+module with server-verified account IDs. It accepts no private keys and sends no funds.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -76,6 +76,14 @@ class BlockstreamClient:
                 raise BlockchainUnavailable("Invalid prior-payment snapshot.")
             txids.append(txid)
         return txids
+
+    def address_transactions(self, address):
+        if not re.fullmatch(r"[a-zA-Z0-9]{26,90}", address):
+            raise BillingError("Invalid receiving address.")
+        rows = self._get(f"/address/{address}/txs", as_json=True)
+        if not isinstance(rows, list) or len(rows) > 100:
+            raise BlockchainUnavailable("Invalid address transaction response.")
+        return rows
 
 
 @contextmanager
@@ -175,6 +183,8 @@ def check_payment(database, invoice_id, authenticated_user_id, txid, chain, *, n
     status = transaction.get("status")
     if not isinstance(outputs, list) or not isinstance(status, dict):
         raise BlockchainUnavailable("Incomplete blockchain transaction response.")
+    if any(not isinstance(output, dict) for output in outputs):
+        raise BlockchainUnavailable("Malformed blockchain transaction outputs.")
     matching = [output.get("value") for output in outputs if output.get("scriptpubkey_address") == invoice["address"]]
     if not matching or any(type(value) is not int or value < 0 for value in matching):
         raise BillingError("The transaction does not pay the receiving address.")

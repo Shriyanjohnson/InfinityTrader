@@ -1,6 +1,9 @@
 import html
 import os
 import re
+import json
+import sqlite3
+import threading
 
 import pandas as pd
 
@@ -15,6 +18,13 @@ from analytics import add_indicators, analyze, completed_history, demo_history
 from product import render_product_page
 from journal_view import render_forecast_journal
 from alerts_view import render_alerts
+import accounts
+from beta_ui import refresh_principal, render_account, render_guide
+from checkout import render_checkout
+from market_data import get_history
+from settings import VERSION, development, live_enabled, free_beta, data_root
+from billing import has_access
+from exports import csv_bytes
 
 st.set_page_config(page_title="InfinityTrader · Market research", page_icon="📈", layout="wide")
 st.markdown("""
@@ -43,19 +53,31 @@ COMPANIES = {"AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOG": "Al
              "AMZN": "Amazon", "TSLA": "Tesla", "META": "Meta", "SPY": "S&P 500 ETF"}
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_history(symbol, mode):
+@st.cache_data(ttl=300, show_spinner=False, max_entries=128)
+def load_history(symbol, mode, source_context=None):
     if mode == "Demo":
         return demo_history(symbol)
-    history = yf.Ticker(symbol).history(period="5y", auto_adjust=True, raise_errors=True, timeout=12)
-    if history.empty:
-        raise ValueError("No history returned for this symbol.")
-    return completed_history(history)
+    if not development():
+        accounts.budget("provider-global", 60)
+    return get_history(symbol)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_resource
+def model_capacity():
+    return threading.BoundedSemaphore(2)
+
+
+@st.cache_data(ttl=300, show_spinner=False, max_entries=128)
 def model_result(data):
-    return analyze(data)
+    if not development():
+        accounts.budget("models-global", 30)
+    capacity = model_capacity()
+    if not capacity.acquire(blocking=False):
+        raise ValueError("Analysis is busy. Try again shortly.")
+    try:
+        return analyze(data)
+    finally:
+        capacity.release()
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -93,9 +115,25 @@ st.session_state.setdefault("selected_symbol", "AAPL")
 st.session_state.setdefault("selected_mode", "Demo")
 st.session_state.setdefault("watchlist", ["AAPL", "MSFT", "NVDA", "SPY"])
 st.session_state.setdefault("page", "Research workspace")
+try:
+    user = refresh_principal()
+except (OSError, sqlite3.Error):
+    st.error("Account storage is unavailable. Please contact the beta operator.")
+    st.stop()
+if not user and st.session_state.get("_watchlist_owner"):
+    # An expired/revoked session must not leave private UI state in a guest workspace.
+    st.session_state.clear()
+    st.session_state.page = "Account"
+    st.rerun()
+if user and st.session_state.get("_watchlist_owner") != user["id"]:
+    st.session_state.watchlist = json.loads(user["watchlist"])
+    st.session_state["_watchlist_owner"] = user["id"]
+if development():
+    st.caption("Development mode · legacy shared local storage. Use beta mode for public testing.")
 with st.sidebar:
     st.markdown('<div class="brand"><span>◈</span> InfinityTrader</div>', unsafe_allow_html=True)
-    page = st.radio("Explore", ["Research workspace", "Product & pricing"], key="page", label_visibility="collapsed")
+    st.caption(f"{VERSION} · {'Signed in: ' + user['username'] if user else 'Demo guest'}")
+    page = st.radio("Explore", ["Research workspace", "Account", "Product & pricing", "Beta guide & feedback"], key="page", label_visibility="collapsed")
     st.divider()
     if page == "Research workspace":
         with st.form("analysis_controls"):
@@ -119,30 +157,61 @@ with st.sidebar:
                 st.rerun()
         if st.button("+ Add current stock", width="stretch"):
             if st.session_state.selected_symbol not in st.session_state.watchlist:
+                if len(st.session_state.watchlist) >= 20:
+                    st.warning("Keep at most 20 watchlist symbols.")
+                    st.stop()
                 st.session_state.watchlist.append(st.session_state.selected_symbol)
+                if user:
+                    accounts.save_watchlist(user["id"], st.session_state.watchlist)
                 st.rerun()
         if st.button("Remove current stock", width="stretch"):
             if st.session_state.selected_symbol in st.session_state.watchlist:
                 st.session_state.watchlist.remove(st.session_state.selected_symbol)
+                if user:
+                    accounts.save_watchlist(user["id"], st.session_state.watchlist)
                 st.rerun()
-        st.caption("Watchlist is saved for this browser session.")
+        st.caption("Watchlist is saved to your account." if user else "Guest watchlist lasts for this browser session.")
     st.divider()
     st.markdown("**Research with perspective.**")
     st.caption("Price action, momentum, and model signals in one workspace.")
     st.caption("Created by Shriyan Kandula")
 
-if page == "Product & pricing":
-    render_product_page()
+try:
+    if page == "Account":
+        render_account(user)
+        render_checkout(user)
+        st.stop()
+    if page == "Beta guide & feedback":
+        render_guide(user)
+        st.stop()
+    if page == "Product & pricing":
+        render_product_page()
+        st.stop()
+except (OSError, sqlite3.Error):
+    st.error("This account operation is unavailable. Please contact the beta operator.")
     st.stop()
 
 symbol, mode = st.session_state.selected_symbol, st.session_state.selected_mode
+if not development():
+    if mode == "Live" and not user:
+        st.info("Sign in through Account to use private Live workspaces. Demo remains available without an account.")
+        st.stop()
+    if mode == "Live" and not live_enabled():
+        st.info("The operator has not enabled licensed live data for this beta. Demo and account controls remain available.")
+        st.stop()
+    if mode == "Live" and not free_beta() and not has_access(data_root() / "billing.sqlite3", user["id"]):
+        st.info("Live access requires a confirmed $5 / 30-day Bitcoin purchase. Open Account to purchase or renew access. Demo remains free.")
+        st.stop()
+    if mode == "Demo" and symbol not in COMPANIES:
+        st.info("Choose one of the eight featured symbols in Demo. Custom symbols are available in signed-in Live analysis.")
+        st.stop()
 title_col, source_col = st.columns([4, 1])
 with title_col:
     st.markdown('<div class="eyebrow">YOUR MARKET WORKSPACE</div>', unsafe_allow_html=True)
     st.title(f"{symbol} · {COMPANIES.get(symbol, 'Stock analysis')}")
     st.caption("Price action. Clearer signals. More context.")
 with source_col:
-    label = "DEMO · SIMULATED" if mode == "Demo" else "YAHOO · DAILY DATA"
+    label = "DEMO · SIMULATED" if mode == "Demo" else "YAHOO · DAILY DATA" if development() else "TWELVE DATA · DAILY DATA"
     st.markdown(f'<div class="tag">{label}</div>', unsafe_allow_html=True)
     if st.button("↻ Refresh data", width="stretch"):
         load_history.clear()
@@ -152,7 +221,8 @@ if mode == "Demo":
     st.info("Demo workspace — prices, indicators, and model results use simulated data. Switch to Live to analyze market history.", icon="ℹ️")
 try:
     with st.spinner(f"Analyzing {symbol}…"):
-        data = add_indicators(load_history(symbol, mode))
+        source_context = f"{development()}:{os.environ.get('INFINITY_MARKET_PROVIDER', '')}"
+        data = add_indicators(load_history(symbol, mode, source_context))
         result = model_result(data)
 except Exception:
     st.error(f"Could not analyze {symbol}. The symbol may have too little history, or the data provider may be unavailable.")
@@ -187,7 +257,7 @@ with chart_col, st.container(border=True):
     count = {"1M": 21, "3M": 63, "6M": 126, "1Y": 252}[window]
     st.plotly_chart(price_chart(data.tail(count), style), width="stretch",
         config={"displaylogo": False, "scrollZoom": False})
-    st.download_button("↓ Download analysis CSV", data=data.to_csv().encode(),
+    st.download_button("↓ Download analysis CSV", data=csv_bytes(data, index=True),
         file_name=f"{symbol}_{mode.lower()}_analysis.csv", mime="text/csv")
 with signal_col, st.container(border=True):
     st.markdown('<div class="eyebrow">NEXT-SESSION OUTLOOK</div>', unsafe_allow_html=True)
@@ -234,7 +304,7 @@ with model_tab:
     else:
         st.caption("Top eight relative influences: forest importance or absolute standardized logistic coefficients. These describe the model, not causation. Historical evaluation does not establish trading profitability.")
 with news_tab:
-    api_key = os.environ.get("NEWSAPI_KEY", "")
+    api_key = os.environ.get("NEWSAPI_KEY", "") if development() or os.environ.get("INFINITY_NEWS_LICENSE_ACK") == "1" else ""
     if mode == "Demo":
         st.info("Live headlines are available in Live mode. Demo data has no associated news.")
     elif not api_key:
