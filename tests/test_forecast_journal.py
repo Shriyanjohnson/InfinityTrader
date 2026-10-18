@@ -1,12 +1,15 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import sqlite3
 from types import SimpleNamespace
 import tempfile
 import unittest
 
 import pandas as pd
 
-from forecast_journal import performance, read_forecasts, record_forecast, settle_forecasts
+from forecast_journal import (filter_forecasts, performance, performance_trend,
+                              read_forecasts, record_forecast, settle_forecasts)
+from market_sessions import next_session_info
 
 
 def prices(sessions=("2026-07-02",), closes=(100,)):
@@ -75,6 +78,65 @@ class ForecastJournalTests(unittest.TestCase):
         settle_forecasts(self.database, "AAPL", prices(), "2026-07-07T12:00:00Z")
         settle_forecasts(self.database, "AAPL", prices(("2026-07-06", "2026-07-07"), (105, 106)), "2026-07-08T12:00:00Z")
         self.assertTrue(read_forecasts(self.database, "AAPL").outcome.isna().all())
+
+    def test_missing_target_session_does_not_grade_a_multiday_return(self):
+        self.record()
+        # July 6 is a trading day. A missing quote must not turn July 7 into
+        # the target of a next-session forecast made from July 2 prices.
+        settle_forecasts(self.database, "AAPL", prices(("2026-07-02", "2026-07-07"), (100, 110)), "2026-07-08T12:00:00Z")
+        self.assertTrue(read_forecasts(self.database, "AAPL").outcome.isna().all())
+        settle_forecasts(self.database, "AAPL", prices(("2026-07-02", "2026-07-06", "2026-07-07"), (100, 99, 110)), "2026-07-08T12:00:00Z")
+        resolved = read_forecasts(self.database, "AAPL").iloc[0]
+        self.assertEqual(resolved.target_session, "2026-07-06")
+        self.assertEqual(resolved.outcome, 0)
+
+    def test_legacy_wrong_session_outcome_is_excluded_without_rewriting_snapshot(self):
+        self.record()
+        with sqlite3.connect(self.database) as connection:
+            connection.execute("UPDATE forecasts SET target_session='2026-07-07', actual_return=.1, outcome=1, eligible=1")
+        records = read_forecasts(self.database, "AAPL")
+        self.assertFalse(records.iloc[0].session_match)
+        self.assertIsNone(performance(records))
+        self.assertTrue(performance_trend(records).empty)
+        self.assertEqual(records.iloc[0].upward_score, .7)
+        self.assertEqual(records.iloc[0].target_session, "2026-07-07")
+
+    def test_weekends_holidays_and_exceptional_closures_are_not_source_sessions(self):
+        for day in ["2026-07-03", "2026-07-04", "2025-01-09"]:
+            with self.subTest(day=day):
+                self.assertIsNone(next_session_info(day))
+                with self.assertRaises(ValueError):
+                    self.record(data=prices((day,), (100,)), now="2026-07-07T12:00:00Z")
+        self.assertEqual(next_session_info("2025-01-08")[0], "2025-01-10")
+
+    def test_confidence_interval_remains_wide_for_one_correct_forecast(self):
+        self.record()
+        settle_forecasts(self.database, "AAPL", prices(("2026-07-02", "2026-07-06"), (100, 110)), "2026-07-07T12:00:00Z")
+        stats = performance(read_forecasts(self.database, "AAPL"))
+        self.assertAlmostEqual(stats["accuracy_low"], .20654931437723745)
+        self.assertAlmostEqual(stats["accuracy_high"], 1.)
+
+    def test_version_filters_trend_and_metrics_use_the_same_eligible_records(self):
+        self.record()
+        self.record(data=prices(("2026-07-06",), (110,)), now="2026-07-07T12:00:00Z")
+        self.record(data=prices(("2026-07-07",), (100,)), now="2026-07-08T16:00:00Z")
+        with sqlite3.connect(self.database) as connection:
+            connection.execute("UPDATE forecasts SET model_revision='older' WHERE source_session='2026-07-02'")
+        settle_forecasts(self.database, "AAPL", prices(("2026-07-02", "2026-07-06", "2026-07-07", "2026-07-08"), (100, 110, 100, 105)), "2026-07-09T12:00:00Z")
+        records = read_forecasts(self.database, "AAPL")
+        original = records.copy(deep=True)
+        self.assertEqual(performance(records)["count"], 2)
+        trend = performance_trend(records)
+        self.assertEqual(list(trend.index), ["2026-07-06", "2026-07-07"])
+        self.assertEqual(list(trend["Forecast accuracy"]), [1., .5])
+        older = filter_forecasts(records, revision="older")
+        self.assertEqual(performance(older)["count"], 1)
+        self.assertEqual(len(performance_trend(older)), 1)
+        recent = filter_forecasts(records, since="2026-07-06")
+        self.assertEqual(performance(recent)["count"], 1)
+        self.assertEqual(performance(recent)["accuracy"], 0)
+        self.assertIsNone(performance(filter_forecasts(records, revision="missing")))
+        pd.testing.assert_frame_equal(records, original)
 
     def test_split_adjustment_uses_consistent_prices_and_resolved_outcome_stays_fixed(self):
         self.record()

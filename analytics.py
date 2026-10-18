@@ -13,6 +13,8 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from market_sessions import session_matches
+
 FEATURES = ["Return", "RSI", "ATR_pct", "SMA20_gap", "SMA50_gap", "Volume_ratio",
             "Return_lag1", "Return_lag2", "Momentum5", "Momentum20",
             "Volatility10", "Volatility20", "RSI_delta5", "MACD_pct",
@@ -93,6 +95,10 @@ def supervised_data(data: pd.DataFrame):
     target = (future > data["Close"]).astype(int)
     valid = data[FEATURES].notna().all(axis=1) & future.notna()
     valid &= np.isfinite(data[FEATURES]).all(axis=1)
+    if str(data.index.tz) == "America/New_York":
+        sessions = data.index.strftime("%Y-%m-%d")
+        matches = [session_matches(source, target) for source, target in zip(sessions[:-1], sessions[1:])]
+        valid &= pd.Series(matches + [False], index=data.index)
     return data.loc[valid, FEATURES], target.loc[valid]
 
 

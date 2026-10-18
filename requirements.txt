@@ -7,4 +7,5 @@ textblob>=0.17,<1
 streamlit>=1.60,<2
 newsapi-python==0.2.7
 requests>=2.32,<3
+exchange-calendars>=4.11,<5
 

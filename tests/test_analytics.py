@@ -4,6 +4,8 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
+from market_sessions import next_session_info
+
 from analytics import (add_indicators, analyze, chronological_split,
                        demo_history, normalize_history, supervised_data,
                        select_model, walk_forward_splits, completed_history, FEATURES)
@@ -68,6 +70,17 @@ class IndicatorTests(unittest.TestCase):
 
 
 class ModelTests(unittest.TestCase):
+    def test_missing_us_session_cannot_create_multiday_training_label(self):
+        history = demo_history("AAPL")
+        history.index = history.index.tz_localize("America/New_York")
+        history = history.loc[[next_session_info(day.date().isoformat()) is not None for day in history.index]]
+        source, missing, after_gap = history.index[149:152]
+        complete_x, _ = supervised_data(add_indicators(history))
+        self.assertIn(source, complete_x.index)
+        incomplete_x, _ = supervised_data(add_indicators(history.drop(index=missing)))
+        self.assertNotIn(source, incomplete_x.index)
+        self.assertIn(after_gap, incomplete_x.index)
+
     def test_last_unknown_outcome_is_excluded(self):
         data = add_indicators(demo_history("AAPL"))
         features, labels = supervised_data(data)

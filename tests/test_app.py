@@ -134,6 +134,31 @@ class AppTests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertTrue(any("calendar days old" in item.value for item in app.warning))
 
+    def test_journal_filters_update_metrics_table_and_empty_state(self):
+        history = demo_history("NVDA")
+        history.index = history.index.tz_localize("America/New_York")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"INFINITY_DATA_DIR": directory}), patch("yfinance.Ticker.history", return_value=history):
+            database = Path(directory) / "forecast_journal.sqlite3"
+            old_source = history.loc[:"2026-07-02"]
+            record_forecast(database, "NVDA", old_source, SimpleNamespace(upward_score=.7, model_name="Random forest"), .6, "2026-07-03T12:00:00Z")
+            with sqlite3.connect(database) as connection:
+                connection.execute("UPDATE forecasts SET model_revision='older'")
+            record_forecast(database, "NVDA", history.iloc[:-1], SimpleNamespace(upward_score=.7, model_name="Random forest"), .6, history.index[-1].normalize() + pd.Timedelta(hours=9))
+            app = AppTest.from_file(APP, default_timeout=30).run()
+            by_label(app.text_input, "Stock symbol").set_value("NVDA")
+            by_label(app.radio, "Data source").set_value("Live")
+            by_label(app.button, "Analyze stock →").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(by_label(app.metric, "Scored forecasts").value, "2")
+            self.assertTrue(any("95% Wilson" in item.value for item in app.caption))
+            by_label(app.selectbox, "Model version").set_value("older").run()
+            self.assertFalse(app.exception)
+            self.assertEqual(by_label(app.metric, "Scored forecasts").value, "1")
+            self.assertEqual(len(app.dataframe[-1].value), 1)
+            by_label(app.selectbox, "Performance window").set_value("Last 30 days").run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("No saved forecasts match" in item.value for item in app.info))
+
     def test_pricing_and_signup_form_persist_and_workspace_navigation_works(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"INFINITY_DATA_DIR": directory}):
             app = AppTest.from_file(APP, default_timeout=30).run()
