@@ -10,6 +10,7 @@ import pandas as pd
 from streamlit.testing.v1 import AppTest
 
 from analytics import demo_history
+from alerts import latest_completed_session, read_events, read_rules
 from forecast_journal import record_forecast
 
 APP = str(Path(__file__).resolve().parents[1] / "main.py")
@@ -178,3 +179,63 @@ class AppTests(unittest.TestCase):
             by_label(app.button, "Open free workspace").click().run()
             self.assertEqual(app.title[0].value, "AAPL · Apple")
             self.assertFalse(app.exception)
+
+    def test_daily_alert_lifecycle_deduplication_and_history_preservation(self):
+        history = demo_history("AMZN")
+        history.index = pd.bdate_range(end=latest_completed_session(), periods=len(history), tz="America/New_York")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"INFINITY_DATA_DIR": directory}), patch("yfinance.Ticker.history", return_value=history):
+            database = Path(directory) / "alerts.sqlite3"
+            app = AppTest.from_file(APP, default_timeout=30).run()
+            self.assertFalse(database.exists())
+            self.assertFalse(any(button.label == "Create daily alert" for button in app.button))
+            by_label(app.text_input, "Stock symbol").set_value("AMZN")
+            by_label(app.radio, "Data source").set_value("Live")
+            by_label(app.button, "Analyze stock →").click().run()
+            self.assertFalse(database.exists())
+            by_label(app.number_input, "Alert threshold").set_value(.0001)
+            by_label(app.button, "Create daily alert").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(read_rules(database, "AMZN")), 1)
+            self.assertEqual(len(read_events(database, "AMZN")), 1)
+            self.assertTrue(any("Daily alert saved" in item.value for item in app.success))
+            by_label(app.button, "↻ Refresh data").click().run()
+            self.assertEqual(len(read_events(database, "AMZN")), 1)
+            by_label(app.button, "Pause").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(read_rules(database, "AMZN")[0]["enabled"], 0)
+            by_label(app.button, "Resume").click().run()
+            self.assertEqual(read_rules(database, "AMZN")[0]["enabled"], 1)
+            by_label(app.button, "Remove").click().run()
+            self.assertFalse(app.exception)
+            self.assertFalse(read_rules(database, "AMZN"))
+            self.assertEqual(len(read_events(database, "AMZN")), 1)
+
+    def test_atr_alert_threshold_converts_percent_to_ratio(self):
+        history = demo_history("SPY")
+        history.index = pd.bdate_range(end=latest_completed_session(), periods=len(history), tz="America/New_York")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"INFINITY_DATA_DIR": directory}), patch("yfinance.Ticker.history", return_value=history):
+            app = AppTest.from_file(APP, default_timeout=30).run()
+            by_label(app.text_input, "Stock symbol").set_value("SPY")
+            by_label(app.radio, "Data source").set_value("Live")
+            by_label(app.button, "Analyze stock →").click().run()
+            by_label(app.selectbox, "Alert metric").set_value("ATR_pct").run()
+            by_label(app.number_input, "Alert threshold").set_value(3.)
+            by_label(app.button, "Create daily alert").click().run()
+            self.assertFalse(app.exception)
+            rule = read_rules(Path(directory) / "alerts.sqlite3", "SPY")[0]
+            self.assertEqual(rule["metric"], "ATR_pct")
+            self.assertAlmostEqual(rule["threshold"], .03)
+
+    def test_daily_alert_storage_failure_keeps_analysis_available(self):
+        history = demo_history("XOM")
+        history.index = pd.bdate_range(end=latest_completed_session(), periods=len(history), tz="America/New_York")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"INFINITY_DATA_DIR": directory}), patch("yfinance.Ticker.history", return_value=history), patch("alerts_view.save_rule", side_effect=sqlite3.OperationalError("Private path")):
+            app = AppTest.from_file(APP, default_timeout=30).run()
+            by_label(app.text_input, "Stock symbol").set_value("XOM")
+            by_label(app.radio, "Data source").set_value("Live")
+            by_label(app.button, "Analyze stock →").click().run()
+            by_label(app.button, "Create daily alert").click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("Daily alerts are unavailable" in item.value for item in app.warning))
+            self.assertTrue(app.metric)
+            self.assertFalse(any("Private path" in item.value for item in app.warning))

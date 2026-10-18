@@ -14,6 +14,7 @@ from textblob import TextBlob
 from analytics import add_indicators, analyze, completed_history, demo_history
 from product import render_product_page
 from journal_view import render_forecast_journal
+from alerts_view import render_alerts
 
 st.set_page_config(page_title="InfinityTrader · Market research", page_icon="📈", layout="wide")
 st.markdown("""
@@ -207,7 +208,7 @@ with signal_col, st.container(border=True):
         st.dataframe(result.folds, hide_index=True, width="stretch")
         st.caption(f"Training ends {result.train_end:%b %d, %Y}; validation starts {result.test_start:%b %d, %Y}. Options chains, premiums, and expiry calendars are not analyzed.")
 
-indicator_tab, model_tab, news_tab, journal_tab = st.tabs(["Technical indicators", "Model details", "News & sentiment", "Forecast journal"])
+indicator_tab, model_tab, news_tab, journal_tab, alerts_tab = st.tabs(["Technical indicators", "Model details", "News & sentiment", "Forecast journal", "Daily alerts"])
 with indicator_tab:
     cols = st.columns(3)
     cols[0].metric("20-day moving average", f"${last.SMA_20:,.2f}", f"Price {last.SMA20_gap:+.1%} vs average", delta_color="off")
@@ -257,4 +258,6 @@ with news_tab:
             st.warning("News is unavailable. Check your NewsAPI access and try again later.")
 with journal_tab:
     render_forecast_journal(symbol, mode, data, result)
+with alerts_tab:
+    render_alerts(symbol, mode, data)
 st.markdown('<div class="footer">InfinityTrader · Educational market research. Signals are not investment advice. Demo results describe simulated prices.</div>', unsafe_allow_html=True)

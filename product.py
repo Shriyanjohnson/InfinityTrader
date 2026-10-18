@@ -39,15 +39,15 @@ def render_product_page():
         st.markdown('<div class="eyebrow">EXPLORER · AVAILABLE NOW</div>', unsafe_allow_html=True)
         st.markdown("## $0")
         st.write("A place to start your research.")
-        st.markdown("- Live and demo stock analysis\n- Interactive charts and technical indicators\n- Session watchlist and CSV export\n- Transparent model validation")
+        st.markdown("- Live and demo stock analysis\n- Interactive charts and technical indicators\n- Session watchlist and CSV export\n- Transparent model validation\n- Daily in-app price and indicator alerts")
         st.button("Open free workspace", on_click=open_workspace, width="stretch")
     with pro, st.container(border=True):
         st.markdown('<div class="eyebrow">PRO · PLANNED FOR LAUNCH</div>', unsafe_allow_html=True)
         st.markdown(f"## ${BILLING['pro_price_usd']} / 30 days")
         st.caption("Pay in Bitcoin. The BTC amount will be quoted at checkout; access starts after 3 blockchain confirmations. Checkout is not available yet.")
         st.write("An alert-focused plan for active traders.")
-        st.markdown("- Custom price-threshold alerts\n- Volatility alerts with clear triggers\n- Watchlists saved across devices\n- Alert history and delivery controls")
-        st.caption("These Pro features are planned and are not included in the current app.")
+        st.markdown("- Background price-threshold monitoring\n- Scheduled volatility alerts and delivery\n- Watchlists saved across devices\n- Notification history and delivery controls")
+        st.caption("Background monitoring, notification delivery, and account-based Pro features are planned. Current daily in-app rules check when you run analysis.")
     st.write("")
     with st.container(border=True):
         st.subheader("Get the launch update")
